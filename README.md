@@ -2,7 +2,7 @@
 
 delete fast as F#@*.
 
-** be careful with this one **
+**Be careful with this one.**
 
 Pairs with [fafind](https://github.com/rywils/fafind).
 It will delete any file that fafind printed.

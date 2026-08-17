@@ -93,25 +93,31 @@ pub fn delete_path(path: &Path) -> io::Result<bool> {
     };
 
     let ft = meta.file_type();
-    #[cfg(windows)]
-    {
-        if ft.is_symlink() && ft.is_dir() {
-            std::fs::remove_dir(path)?;
-        } else if ft.is_dir() {
-            std::fs::remove_dir_all(path)?;
-        } else {
-            std::fs::remove_file(path)?;
+    let removed = {
+        #[cfg(windows)]
+        {
+            if ft.is_symlink() && ft.is_dir() {
+                std::fs::remove_dir(path)
+            } else if ft.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            }
         }
-    }
-    #[cfg(not(windows))]
-    {
-        if ft.is_dir() {
-            std::fs::remove_dir_all(path)?;
-        } else {
-            std::fs::remove_file(path)?;
+        #[cfg(not(windows))]
+        {
+            if ft.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            }
         }
+    };
+    match removed {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
     }
-    Ok(true)
 }
 
 pub fn delete_paths(paths: &[PathBuf]) -> (u64, u64) {
@@ -147,7 +153,7 @@ fn delete_chunk(paths: &[PathBuf]) -> (u64, u64) {
             Ok(true) => ok += 1,
             Ok(false) => {}
             Err(e) => {
-                eprintln!("delfaf: {}: {e}", p.display());
+                eprintln!("delfaf: {}: {e}", p.to_string_lossy().escape_default());
                 err += 1;
             }
         }
