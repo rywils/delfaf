@@ -1,0 +1,19 @@
+[package]
+name = "delfaf"
+version = "0.1.0"
+edition = "2024"
+description = "Delete fafind matches. Fast as fuck."
+license = "MIT"
+repository = "https://github.com/rywils/delfaf"
+readme = "README.md"
+
+[[bin]]
+name = "delfaf"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+strip = true
