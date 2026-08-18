@@ -74,6 +74,22 @@ fn file_arg_deletes_listed_paths() {
 }
 
 #[test]
+fn directory_arg_gives_clear_error() {
+    let dir = tmp("dirarg");
+    let output = Command::new(bin())
+        .arg(&dir)
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!stderr.contains("os error"), "{stderr}");
+    assert!(stderr.contains("is a directory"), "{stderr}");
+    assert!(stderr.contains(&dir.display().to_string()), "{stderr}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn empty_input_exits_1() {
     let mut child = Command::new(bin())
         .stdin(std::process::Stdio::piped())

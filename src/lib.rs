@@ -163,7 +163,7 @@ fn delete_chunk(paths: &[PathBuf]) -> (u64, u64) {
 
 pub fn load_input(file: Option<&Path>) -> io::Result<Vec<u8>> {
     if let Some(path) = file {
-        return std::fs::read(path);
+        return std::fs::read(path).map_err(|e| annotate_directory(e, path));
     }
     let stdin = io::stdin();
     if !stdin.is_terminal() {
@@ -173,7 +173,38 @@ pub fn load_input(file: Option<&Path>) -> io::Result<Vec<u8>> {
     }
     let path = last_cache_path()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no cache dir; set FAFIND_LAST"))?;
-    std::fs::read(path)
+    read_cache(&path)
+}
+
+// faf never writes the last-hits cache file itself, so a directory sitting
+// at that path just means no hits have been recorded yet.
+fn read_cache(path: &Path) -> io::Result<Vec<u8>> {
+    match std::fs::read(path) {
+        Err(e) if is_directory_error(&e, path) => {
+            Err(io::Error::new(io::ErrorKind::NotFound, "no last faf hits"))
+        }
+        other => other,
+    }
+}
+
+fn annotate_directory(e: io::Error, path: &Path) -> io::Error {
+    if is_directory_error(&e, path) {
+        io::Error::new(
+            io::ErrorKind::IsADirectory,
+            format!("{}: is a directory, not a fafind hits file", path.display()),
+        )
+    } else {
+        e
+    }
+}
+
+// Unix reports IsADirectory directly. Windows opens a directory handle fine
+// but fails the read with PermissionDenied, so fall back to a metadata check
+// for that case rather than misreporting a real permission error.
+fn is_directory_error(e: &io::Error, path: &Path) -> bool {
+    e.kind() == io::ErrorKind::IsADirectory
+        || (e.kind() == io::ErrorKind::PermissionDenied
+            && std::fs::metadata(path).is_ok_and(|m| m.is_dir()))
 }
 
 pub fn is_yes(answer: &str) -> bool {
@@ -442,6 +473,43 @@ mod tests {
         writeln!(f, "/x/node_modules").unwrap();
         let bytes = load_input(Some(&list)).unwrap();
         assert_eq!(parse_paths(&bytes), vec![PathBuf::from("/x/node_modules")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_input_rejects_directory_arg() {
+        let dir = tmp_dir("dirarg");
+        let err = load_input(Some(&dir)).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("is a directory"), "{msg}");
+        assert!(msg.contains(&dir.display().to_string()), "{msg}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_directory_via_permission_denied_fallback() {
+        // Windows opens a directory handle fine but fails the read with
+        // PermissionDenied rather than IsADirectory; simulate that here.
+        let dir = tmp_dir("winlike");
+        let simulated = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        assert!(is_directory_error(&simulated, &dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn permission_denied_on_non_directory_is_preserved() {
+        let dir = tmp_dir("permcheck");
+        let missing = dir.join("does-not-exist");
+        let simulated = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        assert!(!is_directory_error(&simulated, &missing));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_directory_reads_as_no_last_hits() {
+        let dir = tmp_dir("cachedir");
+        let err = read_cache(&dir).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
         let _ = fs::remove_dir_all(&dir);
     }
 
