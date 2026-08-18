@@ -85,6 +85,7 @@ fn directory_arg_gives_clear_error() {
     assert_eq!(output.status.code(), Some(2));
     assert!(!stderr.contains("os error"), "{stderr}");
     assert!(stderr.contains("is a directory"), "{stderr}");
+    assert!(stderr.contains(&dir.display().to_string()), "{stderr}");
     let _ = fs::remove_dir_all(&dir);
 }
 

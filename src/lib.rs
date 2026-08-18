@@ -180,7 +180,7 @@ pub fn load_input(file: Option<&Path>) -> io::Result<Vec<u8>> {
 // at that path just means no hits have been recorded yet.
 fn read_cache(path: &Path) -> io::Result<Vec<u8>> {
     match std::fs::read(path) {
-        Err(e) if e.kind() == io::ErrorKind::IsADirectory => {
+        Err(e) if is_directory_error(&e, path) => {
             Err(io::Error::new(io::ErrorKind::NotFound, "no last faf hits"))
         }
         other => other,
@@ -188,14 +188,23 @@ fn read_cache(path: &Path) -> io::Result<Vec<u8>> {
 }
 
 fn annotate_directory(e: io::Error, path: &Path) -> io::Error {
-    if e.kind() == io::ErrorKind::IsADirectory {
+    if is_directory_error(&e, path) {
         io::Error::new(
-            e.kind(),
+            io::ErrorKind::IsADirectory,
             format!("{}: is a directory, not a fafind hits file", path.display()),
         )
     } else {
         e
     }
+}
+
+// Unix reports IsADirectory directly. Windows opens a directory handle fine
+// but fails the read with PermissionDenied, so fall back to a metadata check
+// for that case rather than misreporting a real permission error.
+fn is_directory_error(e: &io::Error, path: &Path) -> bool {
+    e.kind() == io::ErrorKind::IsADirectory
+        || (e.kind() == io::ErrorKind::PermissionDenied
+            && std::fs::metadata(path).is_ok_and(|m| m.is_dir()))
 }
 
 pub fn is_yes(answer: &str) -> bool {
@@ -471,7 +480,28 @@ mod tests {
     fn load_input_rejects_directory_arg() {
         let dir = tmp_dir("dirarg");
         let err = load_input(Some(&dir)).unwrap_err();
-        assert!(err.to_string().contains("is a directory"), "{err}");
+        let msg = err.to_string();
+        assert!(msg.contains("is a directory"), "{msg}");
+        assert!(msg.contains(&dir.display().to_string()), "{msg}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_directory_via_permission_denied_fallback() {
+        // Windows opens a directory handle fine but fails the read with
+        // PermissionDenied rather than IsADirectory; simulate that here.
+        let dir = tmp_dir("winlike");
+        let simulated = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        assert!(is_directory_error(&simulated, &dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn permission_denied_on_non_directory_is_preserved() {
+        let dir = tmp_dir("permcheck");
+        let missing = dir.join("does-not-exist");
+        let simulated = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        assert!(!is_directory_error(&simulated, &missing));
         let _ = fs::remove_dir_all(&dir);
     }
 
