@@ -163,7 +163,7 @@ fn delete_chunk(paths: &[PathBuf]) -> (u64, u64) {
 
 pub fn load_input(file: Option<&Path>) -> io::Result<Vec<u8>> {
     if let Some(path) = file {
-        return std::fs::read(path);
+        return std::fs::read(path).map_err(|e| annotate_directory(e, path));
     }
     let stdin = io::stdin();
     if !stdin.is_terminal() {
@@ -173,7 +173,29 @@ pub fn load_input(file: Option<&Path>) -> io::Result<Vec<u8>> {
     }
     let path = last_cache_path()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no cache dir; set FAFIND_LAST"))?;
-    std::fs::read(path)
+    read_cache(&path)
+}
+
+// faf never writes the last-hits cache file itself, so a directory sitting
+// at that path just means no hits have been recorded yet.
+fn read_cache(path: &Path) -> io::Result<Vec<u8>> {
+    match std::fs::read(path) {
+        Err(e) if e.kind() == io::ErrorKind::IsADirectory => {
+            Err(io::Error::new(io::ErrorKind::NotFound, "no last faf hits"))
+        }
+        other => other,
+    }
+}
+
+fn annotate_directory(e: io::Error, path: &Path) -> io::Error {
+    if e.kind() == io::ErrorKind::IsADirectory {
+        io::Error::new(
+            e.kind(),
+            format!("{}: is a directory, not a fafind hits file", path.display()),
+        )
+    } else {
+        e
+    }
 }
 
 pub fn is_yes(answer: &str) -> bool {
@@ -442,6 +464,22 @@ mod tests {
         writeln!(f, "/x/node_modules").unwrap();
         let bytes = load_input(Some(&list)).unwrap();
         assert_eq!(parse_paths(&bytes), vec![PathBuf::from("/x/node_modules")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_input_rejects_directory_arg() {
+        let dir = tmp_dir("dirarg");
+        let err = load_input(Some(&dir)).unwrap_err();
+        assert!(err.to_string().contains("is a directory"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_directory_reads_as_no_last_hits() {
+        let dir = tmp_dir("cachedir");
+        let err = read_cache(&dir).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
         let _ = fs::remove_dir_all(&dir);
     }
 
